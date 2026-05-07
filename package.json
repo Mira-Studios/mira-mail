@@ -1,0 +1,14 @@
+{
+  "name": "mira-mail",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "website"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=website",
+    "build": "npm run build --workspace=website",
+    "preview": "npm run preview --workspace=website"
+  }
+}
