@@ -28,8 +28,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Load initial config from localStorage
+  // Load initial config from localStorage or auto-detect from server
   useEffect(() => {
+    // Check if server injected config (when being hosted by mira-mail server)
+    const serverConfig = (window as unknown as { __SERVER_CONFIG__?: { url: string; token: string } }).__SERVER_CONFIG__;
+    if (serverConfig?.url && serverConfig?.token) {
+      const autoConfig: ServerConfig = {
+        url: serverConfig.url,
+        token: serverConfig.token,
+      };
+      setConfig(autoConfig);
+      localStorage.setItem('mira-mail-config', JSON.stringify(autoConfig));
+      console.log('Auto-configured from server');
+      return;
+    }
+    
+    // Otherwise load from localStorage
     const stored = localStorage.getItem('mira-mail-config');
     if (stored) {
       try {

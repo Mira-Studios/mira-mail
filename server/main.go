@@ -29,11 +29,18 @@ func downloadSite(siteDir string) error {
 	defer os.Remove(tempFile.Name())
 	
 	// Download the zip
+	log.Printf("Fetching: %s", githubURL)
 	resp, err := http.Get(githubURL)
 	if err != nil {
 		return fmt.Errorf("failed to download from GitHub: %w", err)
 	}
 	defer resp.Body.Close()
+	
+	log.Printf("GitHub response status: %d", resp.StatusCode)
+	
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("GitHub returned 404 - repo or branch not found (check URL: %s)", githubURL)
+	}
 	
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GitHub returned status: %d", resp.StatusCode)
@@ -106,6 +113,28 @@ func downloadSite(siteDir string) error {
 	
 	log.Printf("Site files downloaded and extracted successfully")
 	return nil
+}
+
+// serveIndexHTML serves index.html with injected server configuration
+func serveIndexHTML(w http.ResponseWriter, dataDir, apiKey string) {
+	indexPath := filepath.Join(dataDir, "site", "index.html")
+	
+	// Read the original HTML
+	content, err := os.ReadFile(indexPath)
+	if err != nil {
+		http.Error(w, "Failed to load page", http.StatusInternalServerError)
+		return
+	}
+	
+	// Create server config script to inject
+	serverConfig := fmt.Sprintf(`<script>window.__SERVER_CONFIG__={url:window.location.origin,token:%q};</script>`, apiKey)
+	
+	// Inject before </head> tag
+	html := string(content)
+	html = strings.Replace(html, "</head>", serverConfig+"</head>", 1)
+	
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }
 
 func main() {
@@ -208,7 +237,7 @@ func main() {
 
 		// Serve static files from site directory
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-			http.ServeFile(w, r, filepath.Join(*dataDir, "site", "index.html"))
+			serveIndexHTML(w, *dataDir, config.APIKey)
 			return
 		}
 
