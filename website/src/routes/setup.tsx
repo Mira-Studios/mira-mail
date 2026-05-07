@@ -1,5 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useState, useEffect } from 'react';
 import { Mail, Server, Key, Loader2 } from 'lucide-react';
 import { setServerConfig } from '../lib/auth';
 import { api } from '../lib/api';
@@ -9,10 +9,21 @@ export const Route = createFileRoute('/setup')({
 });
 
 function SetupComponent() {
+  const navigate = useNavigate();
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Auto-redirect if server provided config
+  useEffect(() => {
+    const serverConfig = (window as unknown as { __SERVER_CONFIG__?: { url: string; token: string } }).__SERVER_CONFIG__;
+    if (serverConfig?.url && serverConfig?.token) {
+      console.log('Server config detected, auto-connecting...');
+      setServerConfig({ url: serverConfig.url, token: serverConfig.token });
+      navigate({ to: '/login' });
+    }
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
