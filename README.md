@@ -44,28 +44,15 @@ The server will:
 - Serve the frontend at `http://localhost:8080`
 - Expose API at `http://localhost:8080/api`
 
-## API Key
-
-On first run, the server prints your API key:
-
-```
-=====================================
-  API Key: <64-char hex string>
-=====================================
-```
-
-Store this in the frontend settings to connect.
-
-## Features
-
-- [x] Single EXE - no dependencies
-- [x] Auto-generates API key on first run
-- [x] IMAP email fetching
-- [ ] SMTP sending (WIP)
-- [x] Multiple mailboxes (Inbox, Starred, Sent, Drafts, Trash)
-- [x] Full-width email view
 
 ## Tech Stack
 
 - **Backend:** Go 1.21, go-imap, go-smtp
-- **Frontend:** React, TanStack Router/Query/Virtual, Lucide icons
+- **Frontend:** React, TanStack Router/Query/Virtual
+
+## Install go
+
+Windows
+```
+.\install-go.ps1
+```
