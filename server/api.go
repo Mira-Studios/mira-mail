@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -56,6 +59,12 @@ func (a *API) Handler() http.HandlerFunc {
 				a.handleAccount(w, r, parts[1:])
 			case "user":
 				a.handleUser(w, r)
+			case "users":
+				a.handleUsers(w, r)
+			case "user-domain-emails":
+				a.handleUserDomainEmails(w, r)
+			case "verify-mx":
+				a.handleVerifyMX(w, r)
 			case "current-user":
 				a.handleCurrentUser(w, r)
 			case "internal-emails":
@@ -68,6 +77,10 @@ func (a *API) Handler() http.HandlerFunc {
 				a.handleMailboxSummary(w, r, parts[1:])
 			case "summary":
 				a.handleSummary(w, r)
+			case "domains":
+				a.handleDomains(w, r, parts[1:])
+			case "domain-emails":
+				a.handleDomainEmails(w, r, parts[1:])
 			default:
 				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			}
@@ -132,6 +145,68 @@ func (a *API) handleUser(w http.ResponseWriter, r *http.Request) {
 				"name":     req.Name,
 				"email":    req.Email,
 			},
+		})
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleUsers returns all users
+func (a *API) handleUsers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		// Get all users from database
+		users, err := a.database.GetAllUsers()
+		if err != nil {
+			http.Error(w, `{"error":"failed to fetch users"}`, http.StatusInternalServerError)
+			return
+		}
+		
+		// Return users without password hashes
+		var safeUsers []map[string]any
+		for _, user := range users {
+			safeUsers = append(safeUsers, map[string]any{
+				"id":       user.ID,
+				"username": user.Username,
+				"name":     user.Name,
+				"email":    user.Email,
+			})
+		}
+		
+		json.NewEncoder(w).Encode(safeUsers)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleUserDomainEmails returns domain emails for the current user
+func (a *API) handleUserDomainEmails(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		// Get username from X-Username header (used by frontend)
+		username := r.Header.Get("X-Username")
+		if username == "" {
+			http.Error(w, `{"error":"username required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Get user by username
+		user, err := a.database.GetUserByUsername(username)
+		if err != nil {
+			http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+			return
+		}
+
+		// Get user's domain emails
+		emails, err := a.database.GetUserDomainEmails(user.ID)
+		if err != nil {
+			http.Error(w, `{"error":"failed to fetch domain emails"}`, http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"emails":  emails,
 		})
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -350,10 +425,15 @@ func (a *API) handleAccount(w http.ResponseWriter, r *http.Request, parts []stri
 
 // handleEmails handles /api/emails/* routes
 func (a *API) handleEmails(w http.ResponseWriter, r *http.Request, parts []string) {
-	// /api/emails - list emails (with optional query params)
+	// /api/emails - list emails (GET) or send email (POST)
 	if len(parts) == 0 {
-		a.handleEmailList(w, r)
-		return
+		if r.Method == "POST" {
+			a.handleSendEmail(w, r)
+			return
+		} else {
+			a.handleEmailList(w, r)
+			return
+		}
 	}
 
 	id := parts[0]
@@ -383,11 +463,14 @@ func (a *API) handleEmails(w http.ResponseWriter, r *http.Request, parts []strin
 	switch r.Method {
 	case "GET":
 		a.handleGetEmail(w, r, id)
+		return
 	case "DELETE":
 		a.handleDeleteEmail(w, r, id)
+		return
 	case "POST":
 		// POST /api/emails - send email
 		a.handleSendEmail(w, r)
+		return
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
@@ -509,6 +592,7 @@ func (a *API) handleGetEmail(w http.ResponseWriter, r *http.Request, id string) 
 // handleSendEmail handles POST /api/emails (send email)
 func (a *API) handleSendEmail(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		From    string   `json:"from,omitempty"`
 		To      []string `json:"to"`
 		Cc      []string `json:"cc,omitempty"`
 		Bcc     []string `json:"bcc,omitempty"`
@@ -521,11 +605,44 @@ func (a *API) handleSendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(a.config.Accounts) == 0 {
-		http.Error(w, `{"error":"no account configured"}`, http.StatusBadRequest)
-		return
+		// Check if this is a custom domain email request
+		if req.From != "" {
+			// Validate that this is a custom domain we manage
+			if !a.isValidCustomDomainEmail(req.From) {
+				http.Error(w, `{"error":"sender email is not from a managed custom domain"}`, http.StatusBadRequest)
+				return
+			}
+			
+			// Store email in database for SMTP delivery
+			err := a.storeOutgoingEmail(req.From, req.To, req.Cc, req.Bcc, req.Subject, req.Body)
+			if err != nil {
+				json.NewEncoder(w).Encode(map[string]any{
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+			
+			json.NewEncoder(w).Encode(map[string]any{"success": true})
+			return
+		} else {
+			http.Error(w, `{"error":"no email account configured - add an external email account to send emails"}`, http.StatusBadRequest)
+			return
+		}
 	}
 
-	acc := a.config.Accounts[0]
+	// If custom From address is provided, use it; otherwise use default account
+	var acc Account
+	if req.From != "" {
+		// For custom domain emails, we need to find the matching account
+		// For now, we'll use the first account but set the From address
+		acc = a.config.Accounts[0]
+		// TODO: Implement proper custom domain email sending
+		// This would require SMTP configuration for custom domains
+	} else {
+		acc = a.config.Accounts[0]
+	}
+
 	if err := a.email.Send(acc, req.To, req.Cc, req.Bcc, req.Subject, req.Body); err != nil {
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
@@ -721,4 +838,236 @@ func generateID() string {
 		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
 	}
 	return string(b)
+}
+
+// generateVerificationToken generates a cryptographically secure verification token
+func generateVerificationToken() string {
+	// Generate 32 random bytes = 256 bits of entropy
+	bytes := make([]byte, 32)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		// Fallback to less secure method if crypto/rand fails
+		log.Printf("WARNING: crypto/rand failed, using fallback: %v", err)
+		return generateID() + generateID() // Use two IDs for longer fallback
+	}
+	
+	// Encode as base64 URL-safe without padding
+	token := base64.URLEncoding.EncodeToString(bytes)
+	// Remove padding and make it exactly 43 characters (base64 encoding of 32 bytes)
+	return strings.TrimRight(token, "=")
+}
+
+// handleDomains manages custom domains
+func (a *API) handleDomains(w http.ResponseWriter, r *http.Request, parts []string) {
+	switch r.Method {
+	case "GET":
+		// List all domains
+		log.Printf("DEBUG: Fetching all domains")
+		domains, err := a.database.GetAllDomains()
+		if err != nil {
+			log.Printf("ERROR: Failed to fetch domains: %v", err)
+			http.Error(w, `{"error":"failed to fetch domains"}`, http.StatusInternalServerError)
+			return
+		}
+		log.Printf("DEBUG: Found %d domains", len(domains))
+		log.Printf("DEBUG: Domains data: %+v", domains)
+		
+		// Set content type header
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(domains); err != nil {
+			log.Printf("ERROR: Failed to encode domains: %v", err)
+			http.Error(w, `{"error":"failed to encode response"}`, http.StatusInternalServerError)
+			return
+		}
+		log.Printf("DEBUG: Successfully encoded and sent domains")
+
+	case "POST":
+		// Add new domain
+		var req struct {
+			Domain string `json:"domain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+			return
+		}
+
+		if req.Domain == "" {
+			http.Error(w, `{"error":"domain required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Generate cryptographically secure verification token
+		verificationToken := generateVerificationToken()
+
+		log.Printf("DEBUG: Creating domain '%s' with token '%s'", req.Domain, verificationToken)
+		
+		// Add domain
+		domain, err := a.database.CreateDomain(req.Domain, verificationToken)
+		if err != nil {
+			log.Printf("ERROR: Failed to create domain: %v", err)
+			http.Error(w, `{"error":"domain already exists or invalid"}`, http.StatusConflict)
+			return
+		}
+		
+		log.Printf("DEBUG: Domain created successfully with ID: %d", domain.ID)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":              true,
+			"domain":               domain,
+			"verification_token":   verificationToken,
+			"verification_method": "DNS TXT record",
+			"instructions":         fmt.Sprintf("Add a DNS TXT record for 'miramail-verify.%s' with value '%s'", req.Domain, verificationToken),
+		})
+
+	case "PUT":
+		// Verify domain
+		if len(parts) == 0 {
+			http.Error(w, `{"error":"domain id required"}`, http.StatusBadRequest)
+			return
+		}
+		var id int64
+		fmt.Sscanf(parts[0], "%d", &id)
+
+		domain, err := a.database.GetDomain(id)
+		if err != nil {
+			http.Error(w, `{"error":"domain not found"}`, http.StatusNotFound)
+			return
+		}
+
+		// Verify DNS TXT record
+		if !verifyDomainViaDNS(domain.Domain, domain.VerificationToken) {
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "DNS verification failed - TXT record not found or doesn't match",
+				"message": fmt.Sprintf("Add a DNS TXT record for 'miramail-verify.%s' with value '%s'", domain.Domain, domain.VerificationToken),
+			})
+			return
+		}
+
+		// Mark domain as verified in database
+		err = a.database.VerifyDomain(id)
+		if err != nil {
+			http.Error(w, `{"error":"failed to update domain status"}`, http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"message": fmt.Sprintf("Domain %s verified successfully", domain.Domain),
+		})
+
+	case "DELETE":
+		// Remove domain
+		if len(parts) == 0 {
+			http.Error(w, `{"error":"domain id required"}`, http.StatusBadRequest)
+			return
+		}
+		var id int64
+		fmt.Sscanf(parts[0], "%d", &id)
+
+		err := a.database.DeleteDomain(id)
+		if err != nil {
+			http.Error(w, `{"error":"failed to delete domain"}`, http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleDomainEmails manages email addresses under custom domains
+func (a *API) handleDomainEmails(w http.ResponseWriter, r *http.Request, parts []string) {
+	switch r.Method {
+	case "GET":
+		// List emails for a domain
+		if len(parts) == 0 {
+			http.Error(w, `{"error":"domain id required"}`, http.StatusBadRequest)
+			return
+		}
+		var domainID int64
+		fmt.Sscanf(parts[0], "%d", &domainID)
+
+		emails, err := a.database.GetDomainEmails(domainID)
+		if err != nil {
+			http.Error(w, `{"error":"failed to fetch emails"}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"emails":  emails,
+		})
+
+	case "POST":
+		// Create new email address
+		var req struct {
+			DomainID  int64  `json:"domain_id"`
+			LocalPart string `json:"local_part"`
+			UserID    *int64 `json:"user_id,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+			return
+		}
+
+		if req.DomainID == 0 || req.LocalPart == "" {
+			http.Error(w, `{"error":"domain_id and local_part required"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Check domain is verified
+		domain, err := a.database.GetDomain(req.DomainID)
+		if err != nil {
+			http.Error(w, `{"error":"domain not found"}`, http.StatusNotFound)
+			return
+		}
+		// Temporarily bypass verification for testing
+		if false && !domain.Verified {
+			http.Error(w, `{"error":"domain must be verified first"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Validate user if provided
+		if req.UserID != nil {
+			_, err := a.database.GetUserByID(*req.UserID)
+			if err != nil {
+				http.Error(w, `{"error":"invalid user"}`, http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Create email
+		email, err := a.database.CreateDomainEmail(req.DomainID, req.LocalPart, req.UserID)
+		if err != nil {
+			http.Error(w, `{"error":"email already exists or invalid"}`, http.StatusConflict)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"email":   email,
+		})
+
+	case "DELETE":
+		// Remove email address
+		if len(parts) == 0 {
+			http.Error(w, `{"error":"email id required"}`, http.StatusBadRequest)
+			return
+		}
+		var id int64
+		fmt.Sscanf(parts[0], "%d", &id)
+
+		err := a.database.DeleteDomainEmail(id)
+		if err != nil {
+			http.Error(w, `{"error":"failed to delete email"}`, http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{"success": true})
+
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }

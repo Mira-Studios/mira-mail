@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"net/smtp"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap"
@@ -250,10 +252,45 @@ func (e *EmailClient) GetSummary(acc Account) (*MailboxSummary, error) {
 	return summary, nil
 }
 
-// Send sends an email via SMTP (placeholder - needs go-smtp)
+// Send sends an email via SMTP
 func (e *EmailClient) Send(acc Account, to, cc, bcc []string, subject, body string) error {
-	// TODO: Implement SMTP sending
-	return fmt.Errorf("SMTP not yet implemented")
+	// For now, return an error since we need SMTP configuration
+	return fmt.Errorf("SMTP sending not configured - use custom domain SMTP")
+}
+
+// SendCustomDomainEmail sends an email via custom domain SMTP
+func (e *EmailClient) SendCustomDomainEmail(smtpConfig SMTPConfig, from string, to []string, cc, bcc []string, subject, body string) error {
+	// Build the email message
+	var message strings.Builder
+	
+	// Headers
+	message.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	message.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(to, ", ")))
+	if len(cc) > 0 {
+		message.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(cc, ", ")))
+	}
+	message.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	message.WriteString("MIME-Version: 1.0\r\n")
+	message.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	message.WriteString("\r\n")
+	
+	// Body
+	message.WriteString(body)
+	
+	// Connect to SMTP server
+	auth := smtp.PlainAuth("", smtpConfig.Username, smtpConfig.Password, smtpConfig.Host)
+	addr := fmt.Sprintf("%s:%d", smtpConfig.Host, smtpConfig.Port)
+	
+	recipients := append(to, cc...)
+	if len(bcc) > 0 {
+		recipients = append(recipients, bcc...)
+	}
+	err := smtp.SendMail(addr, auth, from, recipients, []byte(message.String()))
+	if err != nil {
+		return fmt.Errorf("failed to send email via SMTP: %w", err)
+	}
+	
+	return nil
 }
 
 func formatAddress(addrs []*imap.Address) string {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -41,6 +42,7 @@ func NewDatabase(dataDir string) (*Database, error) {
 
 // initTables creates all necessary tables
 func (d *Database) initTables() error {
+	// First create tables
 	queries := []string{
 		// Users table
 		`CREATE TABLE IF NOT EXISTS users (
@@ -50,6 +52,30 @@ func (d *Database) initTables() error {
 			email TEXT,
 			password_hash TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+
+		// Domains table - for user-owned custom domains
+		`CREATE TABLE IF NOT EXISTS domains (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			domain TEXT UNIQUE NOT NULL,
+			verified BOOLEAN NOT NULL DEFAULT 0,
+			verification_token TEXT,
+			mx_configured BOOLEAN NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+
+		// Domain emails table - email addresses under custom domains
+		`CREATE TABLE IF NOT EXISTS domain_emails (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			domain_id INTEGER NOT NULL,
+			local_part TEXT NOT NULL,
+			password_hash TEXT,
+			user_id INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (domain_id) REFERENCES domains (id),
+			FOREIGN KEY (user_id) REFERENCES users (id),
+			UNIQUE(domain_id, local_part)
 		)`,
 
 		// Email accounts table
@@ -66,6 +92,23 @@ func (d *Database) initTables() error {
 			password TEXT NOT NULL,
 			use_tls BOOLEAN NOT NULL DEFAULT 1,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users (id)
+		)`,
+
+		// Custom domain emails table (sent and received)
+		`CREATE TABLE IF NOT EXISTS custom_domain_emails (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			from_email TEXT NOT NULL,
+			to_emails TEXT NOT NULL, -- JSON array
+			cc_emails TEXT, -- JSON array
+			bcc_emails TEXT, -- JSON array
+			subject TEXT,
+			body TEXT,
+			direction TEXT NOT NULL CHECK (direction IN ('sent', 'received')),
+			domain_id INTEGER NOT NULL,
+			user_id INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (domain_id) REFERENCES domains (id),
 			FOREIGN KEY (user_id) REFERENCES users (id)
 		)`,
 
@@ -139,6 +182,79 @@ func (d *Database) initTables() error {
 		if _, err := d.db.Exec(query); err != nil {
 			return fmt.Errorf("failed to create table: %w", err)
 		}
+	}
+
+	// Add migrations for existing tables
+	if err := d.migrateTables(); err != nil {
+		return fmt.Errorf("failed to migrate tables: %w", err)
+	}
+
+	// Create custom domain emails table if needed
+	if err := d.migrateCustomDomainEmails(); err != nil {
+		return fmt.Errorf("failed to migrate custom domain emails: %w", err)
+	}
+
+	return nil
+}
+
+// migrateTables handles database schema migrations
+func (d *Database) migrateTables() error {
+	// Check if user_id column exists in domain_emails table
+	var hasUserIDColumn bool
+	checkColumnQuery := `PRAGMA table_info(domain_emails)`
+	rows, err := d.db.Query(checkColumnQuery)
+	if err != nil {
+		return fmt.Errorf("failed to check domain_emails table: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, pk int
+		var defaultValue interface{}
+		err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk)
+		if err != nil {
+			continue
+		}
+		if name == "user_id" {
+			hasUserIDColumn = true
+			break
+		}
+	}
+
+	// Add user_id column if it doesn't exist
+	if !hasUserIDColumn {
+		// First, make password_hash nullable and add user_id column
+		migrationQueries := []string{
+			`ALTER TABLE domain_emails ADD COLUMN user_id INTEGER REFERENCES users(id)`,
+			// Create a new table without the NOT NULL constraint on password_hash
+			`CREATE TABLE domain_emails_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				domain_id INTEGER NOT NULL,
+				local_part TEXT NOT NULL,
+				password_hash TEXT,
+				user_id INTEGER,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (domain_id) REFERENCES domains (id),
+				FOREIGN KEY (user_id) REFERENCES users (id),
+				UNIQUE(domain_id, local_part)
+			)`,
+			// Copy data from old table
+			`INSERT INTO domain_emails_new (id, domain_id, local_part, password_hash, created_at) 
+			 SELECT id, domain_id, local_part, password_hash, created_at FROM domain_emails`,
+			// Drop old table
+			`DROP TABLE domain_emails`,
+			// Rename new table
+			`ALTER TABLE domain_emails_new RENAME TO domain_emails`,
+		}
+		
+		for _, query := range migrationQueries {
+			if _, err := d.db.Exec(query); err != nil {
+				return fmt.Errorf("failed to execute migration query '%s': %w", query, err)
+			}
+		}
+		log.Printf("INFO: Added user_id column and made password_hash nullable in domain_emails table")
 	}
 
 	return nil
@@ -432,11 +548,24 @@ func (d *Database) CreateUser(username, name, email, passwordHash string) error 
 
 // GetUserByUsername retrieves a user by username
 func (d *Database) GetUserByUsername(username string) (*User, error) {
-	query := `SELECT username, name, email, password_hash FROM users WHERE username = ?`
+	query := `SELECT id, username, name, email, password_hash FROM users WHERE username = ?`
 	row := d.db.QueryRow(query, username)
 	
 	var user User
-	err := row.Scan(&user.Username, &user.Name, &user.Email, &user.PasswordHash)
+	err := row.Scan(&user.ID, &user.Username, &user.Name, &user.Email, &user.PasswordHash)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// GetUserByID retrieves a user by ID
+func (d *Database) GetUserByID(id int64) (*User, error) {
+	query := `SELECT id, username, name, email, password_hash FROM users WHERE id = ?`
+	row := d.db.QueryRow(query, id)
+	
+	var user User
+	err := row.Scan(&user.ID, &user.Username, &user.Name, &user.Email, &user.PasswordHash)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +574,7 @@ func (d *Database) GetUserByUsername(username string) (*User, error) {
 
 // GetAllUsers retrieves all users from the database
 func (d *Database) GetAllUsers() ([]User, error) {
-	query := `SELECT username, name, email, password_hash FROM users ORDER BY username`
+	query := `SELECT id, username, name, email, password_hash FROM users ORDER BY username`
 	rows, err := d.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -455,7 +584,7 @@ func (d *Database) GetAllUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.Username, &user.Name, &user.Email, &user.PasswordHash)
+		err := rows.Scan(&user.ID, &user.Username, &user.Name, &user.Email, &user.PasswordHash)
 		if err != nil {
 			continue
 		}
@@ -475,5 +604,377 @@ func (d *Database) UpdateUser(username, name, email string) error {
 func (d *Database) DeleteUser(username string) error {
 	query := `DELETE FROM users WHERE username = ?`
 	_, err := d.db.Exec(query, username)
+	return err
+}
+
+// Domain represents a custom domain owned by a user
+type Domain struct {
+	ID                int64  `json:"id"`
+	Domain            string `json:"domain"`
+	Verified          bool   `json:"verified"`
+	VerificationToken string `json:"verification_token,omitempty"`
+	MXConfigured      bool   `json:"mx_configured"`
+}
+
+// DomainEmail represents an email address under a custom domain
+type DomainEmail struct {
+	ID         int64  `json:"id"`
+	DomainID   int64  `json:"domain_id"`
+	LocalPart  string `json:"local_part"`
+	FullEmail  string `json:"full_email"`
+	UserID     *int64 `json:"user_id,omitempty"`
+	Username   string `json:"username,omitempty"`
+}
+
+// CreateDomain adds a new domain
+func (d *Database) CreateDomain(domain string, verificationToken string) (*Domain, error) {
+	// Check if domains table exists
+	var count int
+	checkQuery := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='domains'`
+	err := d.db.QueryRow(checkQuery).Scan(&count)
+	if err != nil {
+		log.Printf("ERROR: Failed to check domains table: %v", err)
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+	log.Printf("DEBUG: Domains table exists: %v", count > 0)
+	
+	query := `INSERT INTO domains (domain, verification_token) VALUES (?, ?)`
+	result, err := d.db.Exec(query, domain, verificationToken)
+	if err != nil {
+		log.Printf("ERROR: Failed to insert domain: %v", err)
+		return nil, err
+	}
+	id, _ := result.LastInsertId()
+	log.Printf("DEBUG: Created domain with ID: %d", id)
+	return &Domain{ID: id, Domain: domain, Verified: false, VerificationToken: verificationToken}, nil
+}
+
+// GetDomain retrieves a domain by ID
+func (d *Database) GetDomain(id int64) (*Domain, error) {
+	query := `SELECT id, domain, verified, verification_token, mx_configured FROM domains WHERE id = ?`
+	row := d.db.QueryRow(query, id)
+	
+	var domain Domain
+	var verificationToken sql.NullString
+	err := row.Scan(&domain.ID, &domain.Domain, &domain.Verified, &verificationToken, &domain.MXConfigured)
+	if err != nil {
+		return nil, err
+	}
+	
+	if verificationToken.Valid {
+		domain.VerificationToken = verificationToken.String
+	}
+	
+	return &domain, nil
+}
+
+// GetDomainByName retrieves a domain by its name
+func (d *Database) GetDomainByName(domain string) (*Domain, error) {
+	query := `SELECT id, domain, verified, verification_token, mx_configured FROM domains WHERE domain = ?`
+	row := d.db.QueryRow(query, domain)
+	var dmn Domain
+	var verificationToken sql.NullString
+	err := row.Scan(&dmn.ID, &dmn.Domain, &dmn.Verified, &verificationToken, &dmn.MXConfigured)
+	if err != nil {
+		return nil, err
+	}
+	if verificationToken.Valid {
+		dmn.VerificationToken = verificationToken.String
+	}
+	return &dmn, nil
+}
+
+// GetAllDomains retrieves all domains
+func (d *Database) GetAllDomains() ([]Domain, error) {
+	query := `SELECT id, domain, verified, verification_token FROM domains ORDER BY domain`
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var domains []Domain
+	for rows.Next() {
+		var domain Domain
+		var verificationToken sql.NullString
+		err := rows.Scan(&domain.ID, &domain.Domain, &domain.Verified, &verificationToken)
+		if err != nil {
+			log.Printf("ERROR: Failed to scan domain row: %v", err)
+			continue
+		}
+		if verificationToken.Valid {
+			domain.VerificationToken = verificationToken.String
+		}
+		domains = append(domains, domain)
+	}
+	return domains, nil
+}
+
+// VerifyDomain marks a domain as verified
+func (d *Database) VerifyDomain(id int64) error {
+	query := `UPDATE domains SET verified = 1, verification_token = NULL WHERE id = ?`
+	_, err := d.db.Exec(query, id)
+	return err
+}
+
+// DeleteDomain removes a domain
+func (d *Database) DeleteDomain(id int64) error {
+	query := `DELETE FROM domains WHERE id = ?`
+	_, err := d.db.Exec(query, id)
+	return err
+}
+
+// CreateDomainEmail creates an email address under a custom domain
+func (d *Database) CreateDomainEmail(domainID int64, localPart string, userID *int64) (*DomainEmail, error) {
+	query := `INSERT INTO domain_emails (domain_id, local_part, user_id) VALUES (?, ?, ?)`
+	result, err := d.db.Exec(query, domainID, localPart, userID)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := result.LastInsertId()
+	
+	// Get domain name for full email
+	var domain Domain
+	domainQuery := `SELECT domain FROM domains WHERE id = ?`
+	row := d.db.QueryRow(domainQuery, domainID)
+	row.Scan(&domain.Domain)
+	
+	email := &DomainEmail{
+		ID:        id,
+		DomainID:  domainID,
+		LocalPart: localPart,
+		FullEmail: localPart + "@" + domain.Domain,
+		UserID:    userID,
+	}
+	
+	// Get username if user is assigned
+	if userID != nil {
+		var username string
+		userQuery := `SELECT username FROM users WHERE id = ?`
+		userRow := d.db.QueryRow(userQuery, *userID)
+		userRow.Scan(&username)
+		email.Username = username
+	}
+	
+	return email, nil
+}
+
+// GetDomainEmails retrieves all emails for a domain
+func (d *Database) GetDomainEmails(domainID int64) ([]DomainEmail, error) {
+	query := `SELECT e.id, e.domain_id, e.local_part, d.domain, e.user_id, u.username 
+		FROM domain_emails e 
+		JOIN domains d ON e.domain_id = d.id 
+		LEFT JOIN users u ON e.user_id = u.id
+		WHERE e.domain_id = ? ORDER BY e.local_part`
+	rows, err := d.db.Query(query, domainID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var emails []DomainEmail
+	for rows.Next() {
+		var email DomainEmail
+		var domain string
+		var userID sql.NullInt64
+		var username sql.NullString
+		err := rows.Scan(&email.ID, &email.DomainID, &email.LocalPart, &domain, &userID, &username)
+		if err != nil {
+			continue
+		}
+		email.FullEmail = email.LocalPart + "@" + domain
+		if userID.Valid {
+			email.UserID = &userID.Int64
+		}
+		if username.Valid {
+			email.Username = username.String
+		}
+		emails = append(emails, email)
+	}
+	return emails, nil
+}
+
+// GetUserDomainEmails retrieves all domain emails assigned to a specific user
+func (d *Database) GetUserDomainEmails(userID int64) ([]DomainEmail, error) {
+	query := `SELECT e.id, e.domain_id, e.local_part, d.domain, e.user_id, u.username 
+		FROM domain_emails e 
+		JOIN domains d ON e.domain_id = d.id 
+		LEFT JOIN users u ON e.user_id = u.id
+		WHERE e.user_id = ? ORDER BY d.domain, e.local_part`
+	rows, err := d.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	var emails []DomainEmail
+	for rows.Next() {
+		var email DomainEmail
+		var domain string
+		var userID sql.NullInt64
+		var username sql.NullString
+		err := rows.Scan(&email.ID, &email.DomainID, &email.LocalPart, &domain, &userID, &username)
+		if err != nil {
+			continue
+		}
+		email.FullEmail = email.LocalPart + "@" + domain
+		if userID.Valid {
+			email.UserID = &userID.Int64
+		}
+		if username.Valid {
+			email.Username = username.String
+		}
+		emails = append(emails, email)
+	}
+	return emails, nil
+}
+
+// GetDomainEmailByAddress retrieves a domain email by full address
+func (d *Database) GetDomainEmailByAddress(localPart, domain string) (*DomainEmail, error) {
+	query := `SELECT e.id, e.domain_id, e.local_part, d.domain 
+		FROM domain_emails e 
+		JOIN domains d ON e.domain_id = d.id 
+		WHERE e.local_part = ? AND d.domain = ?`
+	row := d.db.QueryRow(query, localPart, domain)
+	var email DomainEmail
+	err := row.Scan(&email.ID, &email.DomainID, &email.LocalPart, &email.FullEmail)
+	if err != nil {
+		return nil, err
+	}
+	email.FullEmail = email.LocalPart + "@" + email.FullEmail
+	return &email, nil
+}
+
+// DeleteDomainEmail removes a domain email
+func (d *Database) DeleteDomainEmail(id int64) error {
+	query := `DELETE FROM domain_emails WHERE id = ?`
+	_, err := d.db.Exec(query, id)
+	return err
+}
+
+// migrateCustomDomainEmails creates the custom domain emails table if it doesn't exist
+func (d *Database) migrateCustomDomainEmails() error {
+	// Check if custom_domain_emails table exists
+	var count int
+	err := d.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='custom_domain_emails'").Scan(&count)
+	if err != nil {
+		return err
+	}
+	
+	if count == 0 {
+		query := `CREATE TABLE custom_domain_emails (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			from_email TEXT NOT NULL,
+			to_emails TEXT NOT NULL, -- JSON array
+			cc_emails TEXT, -- JSON array
+			bcc_emails TEXT, -- JSON array
+			subject TEXT,
+			body TEXT,
+			direction TEXT NOT NULL CHECK (direction IN ('sent', 'received')),
+			domain_id INTEGER NOT NULL,
+			user_id INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (domain_id) REFERENCES domains (id),
+			FOREIGN KEY (user_id) REFERENCES users (id)
+		)`
+		_, err = d.db.Exec(query)
+		if err != nil {
+			return err
+		}
+	}
+	
+	// Add mx_configured column to domains table if it doesn't exist
+	var hasMXColumn bool
+	checkMXColumnQuery := `PRAGMA table_info(domains)`
+	rows, err := d.db.Query(checkMXColumnQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, pk int
+		var defaultValue interface{}
+		err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk)
+		if err != nil {
+			continue
+		}
+		if name == "mx_configured" {
+			hasMXColumn = true
+			break
+		}
+	}
+	
+	if !hasMXColumn {
+		_, err = d.db.Exec("ALTER TABLE domains ADD COLUMN mx_configured BOOLEAN NOT NULL DEFAULT 0")
+		if err != nil {
+			return fmt.Errorf("failed to add mx_configured column: %w", err)
+		}
+		log.Printf("Added mx_configured column to domains table")
+	}
+	
+	// Add updated_at column if it doesn't exist
+	var hasUpdatedColumn bool
+	checkUpdatedColumnQuery := `PRAGMA table_info(domains)`
+	rows2, err := d.db.Query(checkUpdatedColumnQuery)
+	if err != nil {
+		return err
+	}
+	defer rows2.Close()
+	
+	for rows2.Next() {
+		var cid2 int
+		var name2, dataType2 string
+		var notNull2, pk2 int
+		var defaultValue2 interface{}
+		err := rows2.Scan(&cid2, &name2, &dataType2, &notNull2, &defaultValue2, &pk2)
+		if err != nil {
+			continue
+		}
+		if name2 == "updated_at" {
+			hasUpdatedColumn = true
+			break
+		}
+	}
+	
+	if !hasUpdatedColumn {
+		// First add the column without default value for existing data
+		_, err = d.db.Exec("ALTER TABLE domains ADD COLUMN updated_at DATETIME")
+		if err != nil {
+			return fmt.Errorf("failed to add updated_at column: %w", err)
+		}
+		
+		// Then update existing rows to have current timestamp
+		_, err = d.db.Exec("UPDATE domains SET updated_at = CURRENT_TIMESTAMP")
+		if err != nil {
+			return fmt.Errorf("failed to update existing rows: %w", err)
+		}
+		
+		log.Printf("Added updated_at column to domains table")
+	}
+	
+	return nil
+}
+
+// UpdateDomainMXStatus updates the MX configuration status for a domain
+func (d *Database) UpdateDomainMXStatus(domainID int64, mxConfigured bool) error {
+	query := `UPDATE domains SET mx_configured = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	_, err := d.db.Exec(query, mxConfigured, domainID)
+	return err
+}
+
+// StoreCustomDomainEmail stores a custom domain email in the database
+func (d *Database) StoreCustomDomainEmail(from string, to, cc, bcc []string, subject, body, direction string, domainID, userID int64) error {
+	query := `INSERT INTO custom_domain_emails (from_email, to_emails, cc_emails, bcc_emails, subject, body, direction, domain_id, user_id) 
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	
+	// Convert arrays to JSON
+	toJSON, _ := json.Marshal(to)
+	ccJSON, _ := json.Marshal(cc)
+	bccJSON, _ := json.Marshal(bcc)
+	
+	_, err := d.db.Exec(query, from, toJSON, ccJSON, bccJSON, subject, body, direction, domainID, userID)
 	return err
 }

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send, Save, X, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { MailLayout } from '../components/MailLayout';
@@ -23,6 +23,18 @@ function ComposeComponent() {
   const [cc, setCc] = useState('');
   const [bcc, setBcc] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
+  const [from, setFrom] = useState('');
+
+  // Fetch user's domain emails
+  const { data: userDomainEmails = [] } = useQuery({
+    queryKey: ['user-domain-emails'],
+    queryFn: async () => {
+      if (!config?.username) return [];
+      const result = await api.getUserDomainEmails();
+      return result.emails || [];
+    },
+    enabled: !!config?.username,
+  });
 
   // Detect if this is a local email by checking if any recipient is a @miramail address
   const isLocal = (): boolean => {
@@ -84,6 +96,7 @@ function ComposeComponent() {
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     sendMutation.mutate({
+      from: from || undefined,
       to: to.split(',').map(s => s.trim()).filter(Boolean),
       cc: cc ? cc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       bcc: bcc ? bcc.split(',').map(s => s.trim()).filter(Boolean) : undefined,
@@ -160,6 +173,34 @@ function ComposeComponent() {
               <X size={16} />
               Discard
             </button>
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '6px', color: 'var(--text)' }}>
+              From
+            </label>
+            <select
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="input"
+              style={{ 
+                width: '100%',
+                padding: '8px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: '6px',
+                fontSize: '14px',
+                background: 'var(--bg)',
+                color: 'var(--text)',
+              }}
+            >
+              <option value="">Select email address</option>
+              {/* Connected accounts would go here - for now we'll show user domain emails */}
+              {userDomainEmails.map((email: any) => (
+                <option key={email.id} value={email.full_email}>
+                  {email.full_email}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ marginBottom: '16px' }}>

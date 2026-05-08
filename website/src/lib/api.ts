@@ -212,6 +212,14 @@ export const api = {
     return fetchApi('/api/current-user');
   },
 
+  getAllUsers: (): Promise<any[]> => {
+    return fetchApi('/api/users');
+  },
+
+  getUserDomainEmails: (): Promise<{ success: boolean; emails?: any[]; error?: string }> => {
+    return fetchApi('/api/user-domain-emails');
+  },
+
   // Internal emails
   getInternalEmails: (): Promise<{ success: boolean; emails?: any[]; error?: string }> => {
     return fetchApi('/api/internal-emails');
@@ -241,6 +249,48 @@ export const api = {
     });
   },
 
+  // Domain management
+  getDomains: (): Promise<{ success: boolean; domains?: any[]; error?: string }> => {
+    return fetchApi('/api/domains');
+  },
+
+  addDomain: (domain: string): Promise<{ success: boolean; domain?: any; verification_token?: string; instructions?: string; error?: string }> => {
+    return fetchApi('/api/domains', {
+      method: 'POST',
+      body: JSON.stringify({ domain }),
+    });
+  },
+
+  verifyDomain: (domainId: number): Promise<{ success: boolean; message?: string; error?: string }> => {
+    return fetchApi(`/api/domains/${domainId}`, {
+      method: 'PUT',
+    });
+  },
+
+  deleteDomain: (domainId: number): Promise<{ success: boolean; error?: string }> => {
+    return fetchApi(`/api/domains/${domainId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Domain email management
+  getDomainEmails: (domainId: number): Promise<{ success: boolean; emails?: any[]; error?: string }> => {
+    return fetchApi(`/api/domain-emails/${domainId}`);
+  },
+
+  addDomainEmail: (domainId: number, localPart: string, userId: number | null): Promise<{ success: boolean; email?: any; error?: string }> => {
+    return fetchApi('/api/domain-emails', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, local_part: localPart, user_id: userId }),
+    });
+  },
+
+  deleteDomainEmail: (emailId: number): Promise<{ success: boolean; error?: string }> => {
+    return fetchApi(`/api/domain-emails/${emailId}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Account management
   addAccount: (account: {
     name: string;
@@ -263,6 +313,14 @@ export const api = {
     return fetch(`${url.replace(/\/$/, '')}/api/health`).then(res => {
       if (!res.ok) throw new Error('Server not responding');
       return res.json();
+    });
+  },
+
+  // MX record verification
+  verifyMX: (domainId: number, domain: string): Promise<{ success: boolean; mx_configured?: boolean; error?: string }> => {
+    return fetchApi('/api/verify-mx', {
+      method: 'POST',
+      body: JSON.stringify({ domain_id: domainId, domain }),
     });
   },
 };

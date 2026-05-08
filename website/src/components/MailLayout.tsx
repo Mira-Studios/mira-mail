@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
+import miraMailLogo from '../assets/miraMail.png';
 import { 
   Inbox, 
   Send, 
@@ -78,7 +79,7 @@ export function MailLayout({ children, currentMailbox, summary: _summary, unread
         >
           {isCollapsed ? <PanelLeftOpen size={18} color="white" /> : <PanelLeftClose size={18} color="white" />}
         </button>
-        <img src="/src/assets/miraMail.png" alt="Mira Mail" style={{ height: '32px', width: 'auto', marginTop: '2px', marginBottom: '-2px' }} />
+        <img src={miraMailLogo} alt="Mira Mail" style={{ height: '32px', width: 'auto', marginTop: '2px', marginBottom: '-2px' }} />
       </div>
 
       {/* Sidebar - only navigation collapses */}
@@ -202,6 +203,7 @@ export function MailLayout({ children, currentMailbox, summary: _summary, unread
         flexDirection: 'column',
         overflow: 'hidden',
         background: 'var(--bg)',
+        paddingTop: '50px', // Space for header
       }}>
         {children}
       </main>

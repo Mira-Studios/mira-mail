@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Server, Link2, AlertTriangle, Unlink, Mail, Plus, Trash2, User, X } from 'lucide-react';
+import { Server, Link2, AlertTriangle, Unlink, Mail, Plus, Trash2, User, X, Settings } from 'lucide-react';
 import { clearServerConfig, getServerConfig } from '../lib/auth';
 import { api } from '../lib/api';
 import { useState } from 'react';
 import { MailLayout } from '../components/MailLayout';
+import { DomainManager } from '../components/DomainManager';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsComponent,
@@ -35,7 +36,6 @@ function SettingsComponent() {
 
   const handleSendLocalEmail = async () => {
     if (!currentUserData?.user?.username) return;
-    
     setSending(true);
     try {
       const result = await api.sendInternalEmail({
@@ -44,7 +44,6 @@ function SettingsComponent() {
         subject: composeSubject,
         body: composeBody,
       });
-
       if (result.success) {
         setShowCompose(false);
         setComposeTo('');
@@ -63,435 +62,360 @@ function SettingsComponent() {
 
   return (
     <MailLayout currentMailbox="settings">
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
-        <div style={{ maxWidth: '600px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            marginBottom: '28px',
-          }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '32px 24px' }}>
+        <div style={{ maxWidth: '620px', margin: '0 auto' }}>
+
+          {/* ── Header ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '32px' }}>
             <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              background: 'var(--surface)',
-              border: '1px solid var(--line)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: '44px', height: '44px', borderRadius: '14px',
+              background: 'var(--surface)', border: '1px solid var(--line)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             }}>
-              <Server size={20} />
+              <Settings size={20} />
             </div>
-            <h1 style={{
-              fontSize: '24px',
-              fontWeight: 700,
-              letterSpacing: '-0.02em',
-            }}>
-              Settings
-            </h1>
+            <div>
+              <h1 style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>
+                Settings
+              </h1>
+              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '2px 0 0 0' }}>
+                Manage your account and server connection
+              </p>
+            </div>
           </div>
 
-          {/* User Account Section */}
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <h2 style={{
-              fontSize: '16px',
-              fontWeight: 600,
-              marginBottom: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}>
-              <User size={18} />
-              User Account
-            </h2>
-            <p style={{ 
-              fontSize: '14px', 
-              color: 'var(--muted)',
-              marginBottom: '20px',
-              lineHeight: 1.5,
-            }}>
-              Your Mira Mail user account is created and stored locally.
-            </p>
+          {/* ── User Account ── */}
+          <SectionCard
+            icon={<User size={16} />}
+            title="User Account"
+            subtitle="Your Mira Mail identity, stored locally."
+            style={{ marginBottom: '20px' }}
+          >
             {currentUserData?.success && currentUserData?.user ? (
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px',
-                background: 'var(--bg)',
-                borderRadius: '12px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 16px', background: 'var(--bg)',
+                borderRadius: '10px', border: '1px solid var(--line)',
               }}>
-                <div>
-                  <p style={{ fontWeight: 600, fontSize: '14px' }}>
-                    {currentUserData.user.name || currentUserData.user.username}
-                  </p>
-                  <p style={{ color: 'var(--muted)', fontSize: '13px' }}>
-                    @{currentUserData.user.username}
-                  </p>
-                  {currentUserData.user.email && (
-                    <p style={{ color: 'var(--muted)', fontSize: '12px' }}>
-                      {currentUserData.user.email}
-                    </p>
-                  )}
-                </div>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '13px',
-                  color: 'var(--success)',
-                  fontWeight: 600,
-                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    background: 'var(--success)',
-                  }} />
-                  Active
+                    width: '38px', height: '38px', borderRadius: '50%',
+                    background: 'var(--surface)', border: '1px solid var(--line)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: '14px', color: 'var(--text)', flexShrink: 0,
+                  }}>
+                    {(currentUserData.user.name || currentUserData.user.username || '?')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <p style={{ fontWeight: 600, fontSize: '14px', margin: 0 }}>
+                      {currentUserData.user.name || currentUserData.user.username}
+                    </p>
+                    <p style={{ color: 'var(--muted)', fontSize: '12px', margin: '2px 0 0 0' }}>
+                      @{currentUserData.user.username}
+                      {currentUserData.user.email && ` · ${currentUserData.user.email}`}
+                    </p>
+                  </div>
                 </div>
+                <StatusBadge type="success" label="Active" />
               </div>
             ) : (
-              <div style={{
-                padding: '16px',
-                background: 'var(--bg)',
-                borderRadius: '12px',
-                textAlign: 'center',
-              }}>
-                <p style={{ color: 'var(--muted)', fontSize: '14px' }}>
-                  No user account found
-                </p>
-              </div>
+              <EmptyState label="No user account found" />
             )}
-          </div>
+          </SectionCard>
 
-          {/* Email Accounts Section */}
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '20px',
-            }}>
-              <h2 style={{
-                fontSize: '16px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}>
-                <Mail size={18} />
-                Email Accounts
-              </h2>
+          {/* ── Email Accounts ── */}
+          <SectionCard
+            icon={<Mail size={16} />}
+            title="Email Accounts"
+            subtitle="Connected IMAP/SMTP accounts for sending and receiving."
+            style={{ marginBottom: '20px' }}
+            action={
               <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setShowCompose(true)}
+                  className="btn btn-ghost"
+                  style={{ padding: '6px 12px', fontSize: '13px', gap: '6px' }}
+                >
+                  <Mail size={14} />
+                  Send Local
+                </button>
                 <Link
                   to="/account-setup"
                   className="btn btn-primary"
-                  style={{
-                    textDecoration: 'none',
-                    padding: '6px 12px',
-                    fontSize: '13px',
-                  }}
+                  style={{ textDecoration: 'none', padding: '6px 12px', fontSize: '13px', gap: '6px' }}
                 >
-                  <Plus size={16} />
+                  <Plus size={14} />
                   Add Account
                 </Link>
-                <Link
-                  to="/compose"
-                  search={{ local: 'true' }}
-                  className="btn btn-ghost"
-                  style={{
-                    textDecoration: 'none',
-                    padding: '6px 12px',
-                    fontSize: '13px',
-                  }}
-                >
-                  <Mail size={16} />
-                  Send Local Email
-                </Link>
-          </div>
-
-          {/* Compose Modal */}
-          {showCompose && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000,
-            }}>
-              <div style={{
-                backgroundColor: 'var(--surface)',
-                borderRadius: '12px',
-                padding: '24px',
-                width: '100%',
-                maxWidth: '480px',
-                boxShadow: '0 4px 24px rgba(0, 0, 0, 0.1)',
-              }}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: '20px',
-                }}>
-                  <h3 style={{
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    margin: 0,
-                  }}>
-                    Send Local Email
-                  </h3>
-                  <button
-                    onClick={() => setShowCompose(false)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      fontSize: '20px',
-                      cursor: 'pointer',
-                      color: 'var(--muted)',
-                    }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    marginBottom: '6px',
-                    color: 'var(--text)',
-                  }}>
-                    To
-                  </label>
-                  <input
-                    type="text"
-                    value={composeTo}
-                    onChange={(e) => setComposeTo(e.target.value)}
-                    placeholder="username@miramail"
-                    className="input"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    marginBottom: '6px',
-                    color: 'var(--text)',
-                  }}>
-                    Subject
-                  </label>
-                  <input
-                    type="text"
-                    value={composeSubject}
-                    onChange={(e) => setComposeSubject(e.target.value)}
-                    placeholder="Email subject"
-                    className="input"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    marginBottom: '6px',
-                    color: 'var(--text)',
-                  }}>
-                    Message
-                  </label>
-                  <textarea
-                    value={composeBody}
-                    onChange={(e) => setComposeBody(e.target.value)}
-                    placeholder="Type your message here..."
-                    rows={6}
-                    className="input"
-                    style={{ 
-                      width: '100%', 
-                      minHeight: '120px',
-                      resize: 'vertical',
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={() => setShowCompose(false)}
-                    className="btn btn-ghost"
-                    style={{ marginRight: '8px' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSendLocalEmail}
-                    disabled={sending || !composeTo.trim() || !composeSubject.trim()}
-                    className="btn btn-primary"
-                    style={{ opacity: (sending || !composeTo.trim() || !composeSubject.trim()) ? 0.7 : 1 }}
-                  >
-                    {sending ? 'Sending...' : 'Send Email'}
-                  </button>
-                </div>
               </div>
-            </div>
-          )}
-          </div>
-
+            }
+          >
             {accounts.length === 0 ? (
-              <p style={{ color: 'var(--muted)', fontSize: '14px' }}>
-                No email accounts connected. Add an account to start sending and receiving emails.
-              </p>
+              <EmptyState
+                label="No email accounts connected."
+                sublabel="Add an account to start sending and receiving emails."
+              />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {accounts.map((account: any) => (
                   <div
                     key={account.id}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '16px',
-                      background: 'var(--bg)',
-                      borderRadius: '12px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '14px 16px', background: 'var(--bg)',
+                      borderRadius: '10px', border: '1px solid var(--line)',
                     }}
                   >
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: '14px' }}>
-                        {account.name || account.email}
-                      </p>
-                      <p style={{ color: 'var(--muted)', fontSize: '13px' }}>
-                        {account.email}
-                      </p>
-                      <p style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '4px' }}>
-                        {account.imap_server}
-                      </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{
+                        width: '36px', height: '36px', borderRadius: '50%',
+                        background: 'var(--surface)', border: '1px solid var(--line)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        <Mail size={15} />
+                      </div>
+                      <div>
+                        <p style={{ fontWeight: 600, fontSize: '14px', margin: 0 }}>
+                          {account.name || account.email}
+                        </p>
+                        <p style={{ color: 'var(--muted)', fontSize: '12px', margin: '2px 0 0 0' }}>
+                          {account.email}{account.imap_server && ` · ${account.imap_server}`}
+                        </p>
+                      </div>
                     </div>
                     <button
                       className="btn btn-ghost"
-                      style={{ padding: '8px' }}
-                      onClick={() => {
-                        // TODO: Implement delete account
-                        alert('Delete account - not yet implemented');
-                      }}
+                      style={{ padding: '6px', borderRadius: '8px' }}
+                      onClick={() => alert('Delete account - not yet implemented')}
+                      title="Remove account"
                     >
-                      <Trash2 size={18} color="var(--error)" />
+                      <Trash2 size={15} color="var(--error)" />
                     </button>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </SectionCard>
 
-          <div className="card" style={{ marginBottom: '24px' }}>
-            <h2 style={{ 
-              fontSize: '16px', 
-              fontWeight: 600, 
-              marginBottom: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}>
-              <Link2 size={18} />
-              Server Connection
-            </h2>
-            
+          {/* ── Custom Domains ── */}
+          <SectionCard
+            icon={<Server size={16} />}
+            title="Custom Domains & Emails"
+            subtitle="Manage your domains and associated email addresses."
+            style={{ marginBottom: '20px' }}
+            noPadding
+          >
+            <DomainManager />
+          </SectionCard>
+
+          {/* ── Server Connection ── */}
+          <SectionCard
+            icon={<Link2 size={16} />}
+            title="Server Connection"
+            style={{ marginBottom: '20px' }}
+          >
             {config ? (
-              <div>
-                <div style={{ 
-                  display: 'flex', 
-                  marginBottom: '16px',
-                  fontSize: '14px',
-                }}>
-                  <span style={{ 
-                    width: '100px', 
-                    color: 'var(--muted)',
-                    fontWeight: 500,
-                  }}>
-                    Server URL:
-                  </span>
-                  <span style={{ 
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-all',
-                    fontWeight: 500,
-                    color: 'var(--text)',
-                  }}>
-                    {config.url}
-                  </span>
-                </div>
-                <div style={{ 
-                  display: 'flex',
-                  fontSize: '14px',
-                }}>
-                  <span style={{ 
-                    width: '100px', 
-                    color: 'var(--muted)',
-                    fontWeight: 500,
-                  }}>
-                    Token:
-                  </span>
-                  <span style={{ 
-                    fontFamily: 'monospace',
-                    fontWeight: 500,
-                    color: 'var(--text)',
-                  }}>
-                    {config.token.slice(0, 8)}...{config.token.slice(-8)}
-                  </span>
-                </div>
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: '10px',
+                padding: '14px 16px', background: 'var(--bg)',
+                borderRadius: '10px', border: '1px solid var(--line)',
+              }}>
+                <ConfigRow label="Server URL" value={config.url} mono />
+                <div style={{ height: '1px', background: 'var(--line)' }} />
+                <ConfigRow label="Token" value={`${config.token.slice(0, 8)}...${config.token.slice(-8)}`} mono />
               </div>
             ) : (
-              <p style={{ color: 'var(--muted)' }}>
-                Not configured
-              </p>
+              <EmptyState label="Not configured" />
             )}
-          </div>
+          </SectionCard>
 
-          <div className="card" style={{ 
+          {/* ── Danger Zone ── */}
+          <div className="card" style={{
             borderColor: 'color-mix(in srgb, var(--error) 30%, var(--line))',
+            background: 'color-mix(in srgb, var(--error) 4%, var(--surface))',
           }}>
-            <h2 style={{ 
-              fontSize: '16px', 
-              fontWeight: 600, 
-              marginBottom: '12px',
-              color: 'var(--error)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
+            <h2 style={{
+              fontSize: '14px', fontWeight: 600, marginBottom: '8px',
+              color: 'var(--error)', display: 'flex', alignItems: 'center', gap: '8px',
             }}>
-              <AlertTriangle size={18} />
+              <AlertTriangle size={16} />
               Danger Zone
             </h2>
-            <p style={{ 
-              fontSize: '14px', 
-              color: 'var(--muted)',
-              marginBottom: '20px',
-              lineHeight: 1.5,
-            }}>
+            <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '16px', lineHeight: 1.6 }}>
               Disconnect from the current server. You will need to reconnect to continue using Mira Mail.
             </p>
             <button
               onClick={handleDisconnect}
               className="btn"
-              style={{
-                background: 'var(--error)',
-                color: 'white',
-              }}
+              style={{ background: 'var(--error)', color: 'white', gap: '8px', fontSize: '13px' }}
             >
-              <Unlink size={16} />
+              <Unlink size={15} />
               Disconnect Server
             </button>
           </div>
         </div>
       </div>
+
+      {/* ── Compose Modal ── */}
+      {showCompose && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, backdropFilter: 'blur(4px)',
+        }}>
+          <div style={{
+            backgroundColor: 'var(--surface)', borderRadius: '16px', padding: '24px',
+            width: '100%', maxWidth: '480px',
+            boxShadow: '0 8px 40px rgba(0,0,0,0.18)', border: '1px solid var(--line)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <h3 style={{ fontSize: '17px', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+                  Send Local Email
+                </h3>
+                <p style={{ fontSize: '12px', color: 'var(--muted)', margin: '3px 0 0 0' }}>
+                  Deliver directly within Mira Mail
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCompose(false)}
+                style={{
+                  background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: '8px',
+                  width: '32px', height: '32px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)',
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+              <ComposeField label="To" value={composeTo} onChange={setComposeTo} placeholder="username@miramail" />
+              <ComposeField label="Subject" value={composeSubject} onChange={setComposeSubject} placeholder="Email subject" />
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--text)' }}>
+                  Message
+                </label>
+                <textarea
+                  value={composeBody}
+                  onChange={(e) => setComposeBody(e.target.value)}
+                  placeholder="Type your message here..."
+                  rows={6}
+                  className="input"
+                  style={{ width: '100%', minHeight: '120px', resize: 'vertical', fontSize: '14px' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowCompose(false)} className="btn btn-ghost">Cancel</button>
+              <button
+                onClick={handleSendLocalEmail}
+                disabled={sending || !composeTo.trim() || !composeSubject.trim()}
+                className="btn btn-primary"
+                style={{ opacity: (sending || !composeTo.trim() || !composeSubject.trim()) ? 0.55 : 1 }}
+              >
+                {sending ? 'Sending…' : 'Send Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MailLayout>
+  );
+}
+
+// ─── Shared sub-components ─────────────────────────────────────────────────────
+
+function SectionCard({
+  icon, title, subtitle, action, children, style, noPadding,
+}: {
+  icon?: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+  noPadding?: boolean;
+}) {
+  return (
+    <div className="card" style={style}>
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: '12px', marginBottom: noPadding ? 0 : '16px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--muted)' }}>{icon}</span>
+          <div>
+            <h2 style={{ fontSize: '14px', fontWeight: 600, margin: 0 }}>{title}</h2>
+            {subtitle && (
+              <p style={{ fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0 0', lineHeight: 1.4 }}>
+                {subtitle}
+              </p>
+            )}
+          </div>
+        </div>
+        {action && <div style={{ flexShrink: 0 }}>{action}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusBadge({ type, label }: { type: 'success' | 'warning' | 'error'; label: string }) {
+  const color = { success: 'var(--success)', warning: 'var(--warning)', error: 'var(--error)' }[type];
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '6px',
+      fontSize: '12px', fontWeight: 600, color,
+      background: `color-mix(in srgb, ${color} 12%, transparent)`,
+      padding: '4px 10px', borderRadius: '20px',
+      border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+    }}>
+      <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: color }} />
+      {label}
+    </div>
+  );
+}
+
+function ConfigRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
+      <span style={{ width: '90px', color: 'var(--muted)', fontWeight: 500, flexShrink: 0 }}>{label}</span>
+      <span style={{
+        fontFamily: mono ? 'monospace' : 'inherit', fontWeight: 500, color: 'var(--text)',
+        wordBreak: 'break-all', fontSize: mono ? '12px' : '13px',
+      }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function EmptyState({ label, sublabel }: { label: string; sublabel?: string }) {
+  return (
+    <div style={{
+      padding: '20px', textAlign: 'center',
+      background: 'var(--bg)', borderRadius: '10px', border: '1px solid var(--line)',
+    }}>
+      <p style={{ color: 'var(--muted)', fontSize: '13px', margin: 0 }}>{label}</p>
+      {sublabel && <p style={{ color: 'var(--muted)', fontSize: '12px', margin: '4px 0 0 0', opacity: 0.7 }}>{sublabel}</p>}
+    </div>
+  );
+}
+
+function ComposeField({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: 'var(--text)' }}>
+        {label}
+      </label>
+      <input
+        type="text" value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder} className="input" style={{ width: '100%', fontSize: '14px' }}
+      />
+    </div>
   );
 }

@@ -7,11 +7,37 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// verifyDomainViaDNS checks if a domain has the correct TXT record for verification
+func verifyDomainViaDNS(domain, expectedToken string) bool {
+	// Check for TXT record at miramail-verify.{domain}
+	recordName := "miramail-verify." + domain
+	
+	txtRecords, err := net.LookupTXT(recordName)
+	if err != nil {
+		log.Printf("DNS lookup failed for %s: %v", recordName, err)
+		return false
+	}
+	
+	// Check if any TXT record matches our expected token
+	for _, record := range txtRecords {
+		if strings.TrimSpace(record) == expectedToken {
+			log.Printf("DNS verification successful for %s", domain)
+			return true
+		}
+	}
+	
+	log.Printf("DNS verification failed for %s - no matching TXT record found", domain)
+	log.Printf("Expected token: %s", expectedToken)
+	log.Printf("Found records: %v", txtRecords)
+	return false
+}
 
 // downloadWebsite downloads and extracts the website files from GitHub
 func downloadSite(siteDir string) error {
@@ -221,6 +247,15 @@ func main() {
 
 	// Create API instance
 	api := NewAPI(config, database, *dataDir)
+
+	// Start SMTP server for custom domain emails
+	smtpServer := NewSMTPServer("0.0.0.0", 25, database) // Port 25 for SMTP
+	go func() {
+		if err := smtpServer.Start(); err != nil {
+			log.Printf("Failed to start SMTP server: %v", err)
+		}
+	}()
+	defer smtpServer.Stop()
 
 	// Setup CORS middleware
 	handler := func(w http.ResponseWriter, r *http.Request) {

@@ -13,6 +13,16 @@ import (
 type Config struct {
 	APIKey   string    `json:"api_key"`
 	Accounts []Account `json:"accounts"`
+	SMTP     SMTPConfig `json:"smtp,omitempty"`
+}
+
+// SMTPConfig stores SMTP configuration for custom domain email sending
+type SMTPConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
 }
 
 // InternalEmail represents emails between local users
@@ -30,6 +40,7 @@ type InternalEmail struct {
 
 // User represents a user account
 type User struct {
+	ID           int64  `json:"id"`
 	Username     string `json:"username"`
 	Name         string `json:"name"`
 	Email        string `json:"email"`
